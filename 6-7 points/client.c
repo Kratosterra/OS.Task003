@@ -55,6 +55,12 @@ int main(int argc, char *argv[])
     recv(client_fd, &subrange_start, sizeof(double), 0);
     recv(client_fd, &subrange_end, sizeof(double), 0);
     recv(client_fd, &all_op, sizeof(int), 0);
+    if (subrange_start == subrange_end)
+    {
+        printf("Сервер завершен!\n");
+        close(client_fd);
+        return 0;
+    }
 
     printf("Счетовод получил задание. Область расчёта: [%f, %f]\n", subrange_start, subrange_end);
     subrange_result = calculateArea(subrange_start, subrange_end, all_op);

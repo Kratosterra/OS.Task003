@@ -4,17 +4,69 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <signal.h>
+#include <pthread.h>
 
 // ip 10.0.2.15
 // port 8080
 
 int server_fd;
+pthread_mutex_t mutex;
+FILE *infile, *outfile;
+double total_area = 0.0;
+double subrange_start = 0.0;
+double subrange_size;
+int all_clients;
+int num_clients;
+int observer_socket;
 
 void handler(int signum)
 {
     printf("Получен сигнал, завершаем работу!\n");
+    pthread_exit(NULL);
+    pthread_mutex_destroy(&mutex);
     close(server_fd);
     exit(0);
+}
+
+void *handleClient(void *args)
+{
+    int new_socket = *(int *)args;
+    if (num_clients <= 0)
+    {
+        close(new_socket);
+        free(args);
+        return NULL;
+    }
+
+    num_clients--;
+    pthread_mutex_lock(&mutex);
+
+    double client_subrange_start = subrange_start;
+    double client_subrange_end = subrange_start + subrange_size;
+    subrange_start += subrange_size;
+    double client_result;
+    send(new_socket, &client_subrange_start, sizeof(double), 0);
+    send(new_socket, &client_subrange_end, sizeof(double), 0);
+
+    pthread_mutex_unlock(&mutex);
+
+    send(new_socket, &all_clients, sizeof(int), 0);
+    read(new_socket, &client_result, sizeof(double));
+    fprintf(outfile, "Счетовод [%d] подсчитал площадь своей территории: %.6f кв.м\n", all_clients - num_clients, client_result);
+    printf("Счетовод [%d] подсчитал площадь своей территории: %.6f кв.м\n", all_clients - num_clients, client_result);
+
+    pthread_mutex_lock(&mutex);
+    total_area += client_result;
+    send(observer_socket, &client_subrange_start, sizeof(double), 0);
+    send(observer_socket, &client_subrange_end, sizeof(double), 0);
+    send(observer_socket, &client_result, sizeof(double), 0);
+    send(observer_socket, &total_area, sizeof(double), 0);
+    send(observer_socket, &num_clients, sizeof(int), 0);
+    pthread_mutex_unlock(&mutex);
+
+    close(new_socket);
+    free(args);
+    return NULL;
 }
 
 int main(int argc, char *argv[])
@@ -27,17 +79,14 @@ int main(int argc, char *argv[])
     signal(SIGINT, handler);
     char *ip = argv[1];
     int port = atoi(argv[2]);
-    int num_clients = atoi(argv[3]);
-    FILE *infile, *outfile;
+    num_clients = atoi(argv[3]);
     double a = 0.0;
     double b = 0.0;
 
-    int new_socket, observer_socket, valread;
+    int new_socket, valread;
     struct sockaddr_in address;
     int opt = 1;
     int addrlen = sizeof(address);
-    double total_area = 0.0;
-    double subrange_start = 0.0;
 
     if ((infile = fopen(argv[4], "r")) == NULL)
     {
@@ -61,7 +110,7 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    double subrange_size = (b - a) / num_clients;
+    subrange_size = (b - a) / num_clients;
 
     printf("Пытаемся создать сокет...\n");
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
@@ -88,7 +137,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    if (listen(server_fd, num_clients) < 0)
+    if (listen(server_fd, num_clients + 1) < 0)
     {
         perror("Ошибка слушанья.\n");
         exit(EXIT_FAILURE);
@@ -109,8 +158,9 @@ int main(int argc, char *argv[])
     send(observer_socket, &num_clients, sizeof(int), 0);
 
     printf("Агроном ждет прихода счетоводов...\n");
+    pthread_mutex_init(&mutex, NULL);
     subrange_start = a;
-    int all_clients = num_clients;
+    all_clients = num_clients;
     while (num_clients > 0)
     {
         if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
@@ -118,35 +168,20 @@ int main(int argc, char *argv[])
             perror("Подключение провалено.\n");
             exit(EXIT_FAILURE);
         }
-
         printf("Счетовод пришел за заданием!\n");
-
-        double client_subrange_start = subrange_start;
-        double client_subrange_end = subrange_start + subrange_size;
-
-        send(new_socket, &client_subrange_start, sizeof(double), 0);
-        send(new_socket, &client_subrange_end, sizeof(double), 0);
-        send(new_socket, &all_clients, sizeof(int), 0);
-
-        double client_result;
-        valread = read(new_socket, &client_result, sizeof(double));
-        total_area += client_result;
-
-        fprintf(outfile, "Счетовод [%d] подсчитал площадь своей территории: %.6f кв.м\n", all_clients - num_clients + 1, client_result);
-        printf("Счетовод [%d] подсчитал площадь своей территории: %.6f кв.м\n", all_clients - num_clients + 1, client_result);
-
-        close(new_socket);
-        send(observer_socket, &client_subrange_start, sizeof(double), 0);
-        send(observer_socket, &client_subrange_end, sizeof(double), 0);
-        send(observer_socket, &client_result, sizeof(double), 0);
-        send(observer_socket, &total_area, sizeof(double), 0);
-        send(observer_socket, &num_clients, sizeof(int), 0);
-        num_clients--;
-        subrange_start += subrange_size;
+        pthread_t thread;
+        int *client_socket = malloc(sizeof(int));
+        *client_socket = new_socket;
+        if (pthread_create(&thread, NULL, handleClient, client_socket) != 0)
+        {
+            perror("Ошибка при создании потока клиента.\n");
+            exit(EXIT_FAILURE);
+        }
     }
-
     fprintf(outfile, "Агроном и счетоводы получили общую площадь: %.6f кв.м\n", total_area);
     printf("Агроном и счетоводы получили общую площадь: %.6f кв.м\nПодробнее в файле вывода %s\n", total_area, argv[5]);
+    pthread_exit(NULL);
+    pthread_mutex_destroy(&mutex);
     close(server_fd);
     return 0;
 }

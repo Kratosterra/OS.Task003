@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
     recv(observer_fd, &a, sizeof(double), 0);
     recv(observer_fd, &b, sizeof(double), 0);
     recv(observer_fd, &all_clients, sizeof(int), 0);
-    printf("Общая информация.\na = %f\nb = %f\nКол-во клиентов: %d\n\n", a, b, num_clients);
+    printf("Общая информация.\na = %f\nb = %f\nКол-во клиентов: %d\n\n", a, b, all_clients);
     while (1)
     {
         double subrange_start, subrange_end, client_result, total_area;
@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
         recv(observer_fd, &client_result, sizeof(double), 0);
         recv(observer_fd, &total_area, sizeof(double), 0);
         recv(observer_fd, &num_clients, sizeof(int), 0);
-        printf("Обновление для клиента №%d\n", all_clients - num_clients + 1);
+        printf("Клиент №%d\n", all_clients - num_clients);
         printf("Область [%f, %f]\nКлиент выдал результат: %f\nОбщая площадь: %f\n\n",
                subrange_start, subrange_end, client_result, total_area);
     }
