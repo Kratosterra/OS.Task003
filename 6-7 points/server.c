@@ -177,6 +177,7 @@ int main(int argc, char *argv[])
             perror("Ошибка при создании потока клиента.\n");
             exit(EXIT_FAILURE);
         }
+        pthread_join(thread, NULL);
     }
     fprintf(outfile, "Агроном и счетоводы получили общую площадь: %.6f кв.м\n", total_area);
     printf("Агроном и счетоводы получили общую площадь: %.6f кв.м\nПодробнее в файле вывода %s\n", total_area, argv[5]);
